@@ -1,12 +1,10 @@
 require('dotenv').config();
-const { REST, Routes } = require('discord.js');
+const { Client, REST, Routes } = require('discord.js');
 const { loadSlices } = require('./load-slices');
 
 const token = process.env.DISCORD_TOKEN;
-const clientId = process.env.CLIENT_ID;
-
-if (!token || !clientId) {
-  console.error('Need DISCORD_TOKEN and CLIENT_ID in .env');
+if (!token) {
+  console.error('Need DISCORD_TOKEN in .env');
   process.exit(1);
 }
 
@@ -21,14 +19,24 @@ for (const slice of slices) {
 }
 
 const rest = new REST({ version: '10' }).setToken(token);
+const client = new Client({ intents: [] });
 
-(async () => {
+client.once('clientReady', async () => {
   try {
+    const clientId = client.application.id;
     console.log(`Registering ${allCommands.length} command(s) from ${slices.length} slice(s)...`);
     await rest.put(Routes.applicationCommands(clientId), { body: allCommands });
     console.log('Done.');
   } catch (e) {
     console.error(e);
     process.exit(1);
+  } finally {
+    client.destroy();
+    process.exit(0);
   }
-})();
+});
+
+client.login(token).catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

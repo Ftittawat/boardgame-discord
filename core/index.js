@@ -14,7 +14,7 @@ const client = new Client({
 
 const slices = loadSlices();
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   const { REST, Routes } = require('discord.js');

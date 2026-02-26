@@ -12,7 +12,7 @@ discord-games-bot/
 │   ├── index.js          # เริ่มบอท, ลงทะเบียนคำสั่งทุก slice, ส่ง interaction/message ไป slice
 │   ├── config.js         # อ่าน .env
 │   ├── load-slices.js    # โหลด slices จาก slices/*
-│   └── deploy-commands.js # ใช้ลงทะเบียน slash commands (ต้องมี CLIENT_ID)
+│   └── deploy-commands.js # ใช้ลงทะเบียน slash commands (ดึง Application ID จากบอตอัตโนมัติ)
 ├── slices/
 │   ├── undercover/       # เกม Undercover (/uc)
 │   ├── werewolf/         # เกมหมาป่า (/werewolf)
@@ -36,13 +36,13 @@ discord-games-bot/
    - `DISCORD_TOKEN` — Bot Token จาก [Discord Developer Portal](https://discord.com/developers/applications) → Application → Bot
    - เปิด Privileged Gateway Intents: **Message Content Intent**, **Server Members Intent** (และ Presence ถ้าต้องการ)
 
-4. (ถ้าต้องการลงทะเบียนคำสั่งแยก) ใส่ `CLIENT_ID` ใน `.env` แล้วรัน:
+4. (ถ้าต้องการลงทะเบียนคำสั่งแยก) รัน:
 
    ```bash
    npm run deploy
    ```
 
-   ถ้าไม่รัน deploy บอทจะลงทะเบียนคำสั่งเองตอน `npm start` (ใช้ `client.user.id`)
+   ไม่ต้องใส่ CLIENT_ID — สคริปต์จะดึง Application ID จากบอตอัตโนมัติ ถ้าไม่รัน deploy บอทจะลงทะเบียนคำสั่งเองตอน `npm start`
 
 ## การรันบอท
 
