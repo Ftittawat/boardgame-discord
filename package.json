@@ -1,0 +1,17 @@
+{
+  "name": "discord-games-bot",
+  "version": "1.0.0",
+  "description": "Unified Discord bot: Undercover, Werewolf, Avalon (vertical slice)",
+  "main": "core/index.js",
+  "scripts": {
+    "start": "node core/index.js",
+    "deploy": "node core/deploy-commands.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7"
+  }
+}
