@@ -1,0 +1,7 @@
+services:
+  bot:
+    build: .
+    image: discord-games-bot
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
