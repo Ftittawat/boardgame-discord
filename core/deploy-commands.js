@@ -21,7 +21,7 @@ for (const slice of slices) {
 const rest = new REST({ version: '10' }).setToken(token);
 const client = new Client({ intents: [] });
 
-client.once('clientReady', async () => {
+client.once('ready', async () => {
   try {
     const clientId = client.application.id;
     console.log(`Registering ${allCommands.length} command(s) from ${slices.length} slice(s)...`);
