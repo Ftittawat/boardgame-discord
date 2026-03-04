@@ -1,5 +1,14 @@
 const words = require('../words');
 
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 const ROLES = {
   CIVILIAN: 'civilian',
   UNDERCOVER: 'undercover',
@@ -50,23 +59,56 @@ class UndercoverGame {
     return this.players.size >= this.minPlayers && this.phase === 'waiting';
   }
 
-  start() {
+  start(options = {}) {
     if (!this.canStart()) return { success: false, message: 'Not enough players (need at least ' + this.minPlayers + ')' };
 
     const playerList = [...this.players.values()];
-    const pair = words[Math.floor(Math.random() * words.length)];
-    const [civilianWord, undercoverWord] = pair;
+    const n = playerList.length;
 
-    const undercoverIndex = Math.floor(Math.random() * playerList.length);
+    let undercoverCount, wantMrWhite;
+
+    const optUnder = options.undercoverCount ?? 1;
+    const optMrWhite = options.mrWhite ?? false;
+
+    if (n === 3 || n === 4) {
+      undercoverCount = 1;
+      wantMrWhite = false;
+    } else if (optMrWhite && n < 5) {
+      return { success: false, message: 'Mr. White requires at least 5 players' };
+    } else if (optUnder > 3) {
+      return { success: false, message: 'Max 3 Undercover' };
+    } else {
+      const nonCivilianCount = optUnder + (optMrWhite ? 1 : 0);
+      const civilCount = n - nonCivilianCount;
+      if (civilCount <= nonCivilianCount) {
+        const maxNonCivil = Math.floor((n - 1) / 2);
+        const maxU = Math.min(3, maxNonCivil - (optMrWhite ? 1 : 0));
+        return {
+          success: false,
+          message: `Civil must outnumber others — max ${maxU} Undercover${optMrWhite ? ' (with Mr. White)' : ''}`,
+        };
+      }
+      undercoverCount = optUnder;
+      wantMrWhite = optMrWhite;
+    }
+
+    const pair = words[Math.floor(Math.random() * words.length)];
+    const swap = Math.random() < 0.5;
+    const civilianWord = swap ? pair[1] : pair[0];
+    const undercoverWord = swap ? pair[0] : pair[1];
+
+    const indices = playerList.map((_, i) => i);
+    const shuffled = shuffle(indices);
+
+    const undercoverIndices = new Set(shuffled.slice(0, undercoverCount));
     let mrWhiteIndex = -1;
-    if (playerList.length >= 5 && Math.random() < 0.3) {
-      do {
-        mrWhiteIndex = Math.floor(Math.random() * playerList.length);
-      } while (mrWhiteIndex === undercoverIndex);
+    if (wantMrWhite) {
+      const remain = shuffled.slice(undercoverCount);
+      mrWhiteIndex = remain[0];
     }
 
     playerList.forEach((player, i) => {
-      if (i === undercoverIndex) {
+      if (undercoverIndices.has(i)) {
         player.role = ROLES.UNDERCOVER;
         player.word = undercoverWord;
       } else if (i === mrWhiteIndex) {
@@ -78,17 +120,25 @@ class UndercoverGame {
       }
     });
 
-    this.wordPair = pair;
+    this.wordPair = [civilianWord, undercoverWord];
     this.phase = 'describing';
     this.currentRound = 1;
     this.descriptions.clear();
     this.votes.clear();
+
+    const alive = this.getAlivePlayers();
+    const nonMrWhite = alive.filter(p => p.role !== ROLES.MR_WHITE);
+    const firstPlayer = nonMrWhite[Math.floor(Math.random() * nonMrWhite.length)];
+    const rest = shuffle(alive.filter(p => p.id !== firstPlayer.id));
+    this.describeOrder = [firstPlayer, ...rest];
+    this.displayNames = new Map();
 
     return {
       success: true,
       civilianWord,
       undercoverWord,
       hasMrWhite: mrWhiteIndex >= 0,
+      undercoverCount,
     };
   }
 
@@ -97,8 +147,22 @@ class UndercoverGame {
     const player = this.players.get(userId);
     if (!player || player.eliminated) return false;
     if (this.descriptions.has(userId)) return false;
+
     this.descriptions.set(userId, description);
     return true;
+  }
+
+  getNextToDescribe() {
+    if (!this.describeOrder) return null;
+    return this.describeOrder.find(p => !this.descriptions.has(p.id)) || null;
+  }
+
+  getDescribeOrderWithNames() {
+    if (!this.describeOrder) return [];
+    return this.describeOrder.map((p, i) => ({
+      num: i + 1,
+      name: this.displayNames.get(p.id) || p.username,
+    }));
   }
 
   allDescribed() {
@@ -109,7 +173,9 @@ class UndercoverGame {
   startVoting() {
     this.phase = 'voting';
     this.votes.clear();
-    [...this.players.values()].forEach(p => { p.voted = false; });
+    [...this.players.values()].forEach(p => {
+      p.voted = false;
+    });
   }
 
   vote(voterId, targetId) {
@@ -119,6 +185,7 @@ class UndercoverGame {
     if (!voter || !target || voter.eliminated || target.eliminated) return false;
     if (voter.voted) return false;
     if (voterId === targetId) return false;
+
     this.votes.set(voterId, targetId);
     voter.voted = true;
     return true;
@@ -145,19 +212,29 @@ class UndercoverGame {
   checkGameEnd() {
     const alive = this.getAlivePlayers();
     const undercoverAlive = alive.filter(p => p.role === ROLES.UNDERCOVER);
-    const mrWhiteAlive = alive.filter(p => p.role === ROLES.MR_WHITE);
     const civiliansAlive = alive.filter(p => p.role === ROLES.CIVILIAN);
+
     return {
-      civiliansWin: undercoverAlive.length === 0 && mrWhiteAlive.length === 0,
-      undercoverWin: undercoverAlive.length + mrWhiteAlive.length >= civiliansAlive.length,
+      civiliansWin: undercoverAlive.length === 0,
+      undercoverWin: undercoverAlive.length >= civiliansAlive.length && undercoverAlive.length > 0,
       eliminated: null,
     };
+  }
+
+  checkMrWhiteGuess(guess) {
+    if (!this.wordPair) return false;
+    const civilianWord = this.wordPair[0];
+    return guess.trim().toLowerCase() === civilianWord.toLowerCase();
   }
 
   getPlayerInfo(userId) {
     const p = this.players.get(userId);
     if (!p) return null;
-    return { ...p, word: p.word, role: p.role };
+    return {
+      ...p,
+      word: p.word,
+      role: p.role,
+    };
   }
 
   resetRound() {
@@ -166,10 +243,32 @@ class UndercoverGame {
     this.currentRound++;
     this.phase = 'describing';
     [...this.players.values()].forEach(p => { p.voted = false; });
+    const alive = this.getAlivePlayers();
+    const nonMrWhite = alive.filter(p => p.role !== ROLES.MR_WHITE);
+    const firstPlayer = nonMrWhite[Math.floor(Math.random() * nonMrWhite.length)];
+    const rest = shuffle(alive.filter(p => p.id !== firstPlayer.id));
+    this.describeOrder = [firstPlayer, ...rest];
   }
 
   endGame() {
     this.phase = 'ended';
+  }
+
+  resetToWaiting() {
+    this.phase = 'waiting';
+    this.wordPair = null;
+    delete this.pendingMrWhiteGuess;
+    this.descriptions.clear();
+    this.votes.clear();
+    this.currentRound = 0;
+    this.describeOrder = null;
+    this.displayNames = new Map();
+    [...this.players.values()].forEach(p => {
+      p.role = null;
+      p.word = null;
+      p.eliminated = false;
+      p.voted = false;
+    });
   }
 }
 

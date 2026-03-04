@@ -14,13 +14,13 @@ module.exports = [
       sc.setName('leave').setDescription('Leave the room (before game starts)')
     )
     .addSubcommand(sc =>
-      sc.setName('start').setDescription('Start the game (Host only)')
+      sc.setName('start').setDescription('Start the game (options shown based on player count)')
     )
     .addSubcommand(sc =>
       sc.setName('word').setDescription('View your word again (sent via DM)')
     )
     .addSubcommand(sc =>
-      sc.setName('vote').setDescription('Start the voting phase (Host only)')
+      sc.setName('vote').setDescription('Start the voting phase')
     )
     .addSubcommand(sc =>
       sc.setName('end').setDescription('End the game (Host only)')
@@ -28,4 +28,4 @@ module.exports = [
     .addSubcommand(sc =>
       sc.setName('help').setDescription('Show how to play and all commands')
     ),
-];
+].map(cmd => cmd.toJSON());
