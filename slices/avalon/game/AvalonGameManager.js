@@ -33,6 +33,8 @@ class AvalonGame {
     this.missionVotes = new Map();
     this.consecutiveRejectedTeams = 0;
     this.winner = null;
+    this.lobbyMessageId = null;
+    this.missionPromptMessageId = null;
   }
 
   addPlayer(id, name) {
@@ -91,7 +93,26 @@ class AvalonGame {
   }
 
   getCurrentQuest() {
-    return this.quests[this.currentQuestIndex] != null ? this.quests[this.currentQuestIndex] : null;
+    return this.quests[this.currentQuestIndex] != null
+      ? this.quests[this.currentQuestIndex]
+      : null;
+  }
+
+  getQuestTable() {
+    const nums = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+    return this.quests
+      .map((q, i) => {
+        const icon =
+          q.result === 'success' ? '✅' : q.result === 'fail' ? '❌' : '◻️';
+        const active =
+          i === this.currentQuestIndex && this.phase !== 'ended' ? ' 👈' : '';
+        const extra =
+          q.failsRequired > 1
+            ? ` (ล้มเหลวเมื่อ ≥ ${q.failsRequired} ใบ)`
+            : '';
+        return `${nums[i]} ${icon} ภารกิจ ${i + 1}: ทีม **${q.teamSize}** คน${extra}${active}`;
+      })
+      .join('\n');
   }
 
   proposeTeam(leaderId, memberIds) {
@@ -117,11 +138,13 @@ class AvalonGame {
     if (uniqueMembers.length !== quest.teamSize) {
       return {
         ok: false,
-        message: `จำนวนสมาชิกทีมต้องเท่ากับ ${quest.teamSize} คน`,
+        message: `จำนวนสมาชิกทีมต้องเท่ากับ ${quest.teamSize} คน (ตอนนี้เลือกมา ${uniqueMembers.length} คน)`,
       };
     }
 
-    const invalid = uniqueMembers.find((id) => !this.players.some((p) => p.id === id));
+    const invalid = uniqueMembers.find(
+      (id) => !this.players.some((p) => p.id === id),
+    );
     if (invalid) {
       return { ok: false, message: 'มีผู้เล่นบางคนที่ไม่ได้อยู่ในเกมนี้' };
     }
@@ -130,14 +153,7 @@ class AvalonGame {
     this.teamVotes = new Map();
     this.phase = 'team_vote';
 
-    const teamList = this.selectedTeam.map((id) => `<@${id}>`).join(', ');
-    return {
-      ok: true,
-      message:
-        `หัวหน้าทีม <@${leader.id}> ได้เสนอทีมสำหรับภารกิจที่ ${this.currentQuestIndex + 1}\n` +
-        `สมาชิกทีม: ${teamList}\n\n` +
-        'ผู้เล่นทุกคนในเกม ใช้คำสั่ง `/avalon vote_team` เพื่อลงคะแนนเห็นด้วย/ไม่เห็นด้วยกับทีมนี้',
-    };
+    return { ok: true };
   }
 
   voteTeam(playerId, approve) {
@@ -148,62 +164,82 @@ class AvalonGame {
     if (!this.players.some((p) => p.id === playerId)) {
       return { ok: false, message: 'คุณไม่ได้อยู่ในเกมนี้', ephemeral: true };
     }
+    if (this.teamVotes.has(playerId)) {
+      return { ok: false, message: 'คุณได้โหวตไปแล้ว', ephemeral: true };
+    }
 
     this.teamVotes.set(playerId, approve);
     const remaining = this.players.length - this.teamVotes.size;
 
-    let broadcast = null;
-    if (this.teamVotes.size === this.players.length) {
-      let approveCount = 0;
-      let rejectCount = 0;
-      for (const v of this.teamVotes.values()) {
-        if (v) approveCount += 1;
-        else rejectCount += 1;
-      }
-
-      const questNo = this.currentQuestIndex + 1;
-      const teamList = this.selectedTeam.map((id) => `<@${id}>`).join(', ');
-      const approved = approveCount > rejectCount;
-
-      if (approved) {
-        this.phase = 'mission';
-        this.consecutiveRejectedTeams = 0;
-        broadcast =
-          `**ผลโหวตทีม ภารกิจที่ ${questNo}**\n` +
-          `เห็นด้วย: ${approveCount} | ไม่เห็นด้วย: ${rejectCount}\n` +
-          `ทีมนี้ได้รับการอนุมัติ สมาชิกทีม: ${teamList}\n\n` +
-          'สมาชิกทีมใช้คำสั่ง `/avalon mission_vote` เพื่อโหวต สำเร็จ/ล้มเหลว (ฝ่ายดีต้องโหวตสำเร็จเท่านั้น)';
-      } else {
-        this.consecutiveRejectedTeams += 1;
-        this.leaderIndex = (this.leaderIndex + 1) % this.players.length;
-        const newLeader = this.getLeader();
-
-        if (this.consecutiveRejectedTeams >= 5) {
-          this.phase = 'ended';
-          this.winner = 'evil';
-          broadcast =
-            `**ผลโหวตทีม ภารกิจที่ ${questNo}**\n` +
-            `เห็นด้วย: ${approveCount} | ไม่เห็นด้วย: ${rejectCount}\n` +
-            'ทีมถูกปฏิเสธครบ 5 ครั้งติดต่อกัน ฝ่ายร้ายชนะทันที!';
-        } else {
-          this.phase = 'team_proposal';
-          broadcast =
-            `**ผลโหวตทีม ภารกิจที่ ${questNo}**\n` +
-            `เห็นด้วย: ${approveCount} | ไม่เห็นด้วย: ${rejectCount}\n` +
-            'ทีมนี้ถูกปฏิเสธ หัวหน้าทีมจะหมุนไปคนถัดไป\n' +
-            `หัวหน้าทีมคนใหม่คือ <@${newLeader.id}> ใช้คำสั่ง \`/avalon propose_team\` เพื่อเสนอทีมใหม่`;
-        }
-      }
-
-      this.teamVotes = new Map();
+    if (this.teamVotes.size < this.players.length) {
+      return {
+        ok: true,
+        allVotesIn: false,
+        message: `ลงคะแนนเรียบร้อยแล้ว (ยังเหลือผู้เล่นอีก ${remaining} คนที่ยังไม่ได้โหวต)`,
+        ephemeral: true,
+      };
     }
+
+    const approveVoterIds = [];
+    const rejectVoterIds = [];
+    for (const [pid, v] of this.teamVotes.entries()) {
+      if (v) approveVoterIds.push(pid);
+      else rejectVoterIds.push(pid);
+    }
+
+    const approveCount = approveVoterIds.length;
+    const rejectCount = rejectVoterIds.length;
+    const questNo = this.currentQuestIndex + 1;
+    const quest = this.getCurrentQuest();
+    const teamList = this.selectedTeam.map((id) => `<@${id}>`).join(', ');
+    const approved = approveCount > rejectCount;
+    const rejectMentions =
+      rejectVoterIds.length > 0
+        ? rejectVoterIds.map((id) => `<@${id}>`).join(', ')
+        : '-';
+
+    let broadcast;
+
+    if (approved) {
+      this.phase = 'mission';
+      this.consecutiveRejectedTeams = 0;
+      this.missionVotes = new Map();
+      broadcast =
+        `**ผลโหวตทีม — ภารกิจที่ ${questNo}** (ทีม ${quest.teamSize} คน)\n` +
+        `✅ เห็นด้วย: ${approveCount} | ❌ ไม่เห็นด้วย: ${rejectCount}\n` +
+        `ผู้ที่โหวตไม่เห็นด้วย: ${rejectMentions}\n\n` +
+        `ทีมนี้ได้รับการอนุมัติ! สมาชิกทีม: ${teamList}\n` +
+        'สมาชิกทีมจะได้รับ DM เพื่อโหวตผลภารกิจ';
+    } else {
+      this.consecutiveRejectedTeams += 1;
+      this.leaderIndex = (this.leaderIndex + 1) % this.players.length;
+      const newLeader = this.getLeader();
+
+      if (this.consecutiveRejectedTeams >= 5) {
+        this.phase = 'ended';
+        this.winner = 'evil';
+        broadcast =
+          `**ผลโหวตทีม — ภารกิจที่ ${questNo}**\n` +
+          `✅ เห็นด้วย: ${approveCount} | ❌ ไม่เห็นด้วย: ${rejectCount}\n` +
+          `ผู้ที่โหวตไม่เห็นด้วย: ${rejectMentions}\n\n` +
+          '⚠️ ทีมถูกปฏิเสธครบ 5 ครั้งติดต่อกัน **ฝ่ายร้ายชนะทันที!**';
+      } else {
+        this.phase = 'team_proposal';
+        broadcast =
+          `**ผลโหวตทีม — ภารกิจที่ ${questNo}**\n` +
+          `✅ เห็นด้วย: ${approveCount} | ❌ ไม่เห็นด้วย: ${rejectCount}\n` +
+          `ผู้ที่โหวตไม่เห็นด้วย: ${rejectMentions}\n\n` +
+          `ทีมนี้ถูกปฏิเสธ (ปฏิเสธติดต่อกัน ${this.consecutiveRejectedTeams}/5)\n` +
+          `หัวหน้าทีมคนใหม่คือ <@${newLeader.id}>`;
+      }
+    }
+
+    this.teamVotes = new Map();
 
     return {
       ok: true,
-      message:
-        remaining > 0
-          ? `ลงคะแนนเรียบร้อยแล้ว (ยังเหลือผู้เล่นอีก ${remaining} คนที่ยังไม่ได้โหวต)`
-          : 'ลงคะแนนเรียบร้อยแล้ว',
+      allVotesIn: true,
+      message: 'ลงคะแนนเรียบร้อยแล้ว',
       broadcast,
       ephemeral: true,
     };
@@ -217,81 +253,95 @@ class AvalonGame {
     const quest = this.getCurrentQuest();
     if (!quest) return { ok: false, message: 'ไม่พบข้อมูลภารกิจ (เกมอาจจบแล้ว)' };
     if (!this.selectedTeam.includes(playerId)) {
-      return { ok: false, message: 'มีเพียงสมาชิกทีมภารกิจเท่านั้นที่สามารถโหวตได้', ephemeral: true };
+      return {
+        ok: false,
+        message: 'มีเพียงสมาชิกทีมภารกิจเท่านั้นที่สามารถโหวตได้',
+        ephemeral: true,
+      };
     }
-    const player = this.players.find((p) => p.id === playerId);
-    if (!player) return { ok: false, message: 'ไม่พบข้อมูลผู้เล่น', ephemeral: true };
     if (this.missionVotes.has(playerId)) {
       return { ok: false, message: 'คุณได้โหวตไปแล้ว', ephemeral: true };
     }
+    const player = this.players.find((p) => p.id === playerId);
+    if (!player) return { ok: false, message: 'ไม่พบข้อมูลผู้เล่น', ephemeral: true };
 
-    let finalChoice = choice;
-    let note = '';
-    if (player.role.side === 'good' && choice === 'fail') {
-      finalChoice = 'success';
-      note = ' (คุณเป็นฝ่ายดี จึงถือว่าโหวตสำเร็จเท่านั้น)';
-    }
+    const finalChoice =
+      player.role.side === 'good' && choice === 'fail' ? 'success' : choice;
 
     this.missionVotes.set(playerId, finalChoice);
     const remaining = this.selectedTeam.length - this.missionVotes.size;
 
-    let broadcast = null;
-    if (this.missionVotes.size === this.selectedTeam.length) {
-      let failCount = 0;
-      for (const v of this.missionVotes.values()) {
-        if (v === 'fail') failCount += 1;
-      }
-      const questNo = this.currentQuestIndex + 1;
-      const success = failCount < quest.failsRequired;
-      quest.result = success ? 'success' : 'fail';
+    if (this.missionVotes.size < this.selectedTeam.length) {
+      return {
+        ok: true,
+        allVotesIn: false,
+        message: `ลงคะแนนภารกิจเรียบร้อยแล้ว (ยังเหลือสมาชิกทีมอีก ${remaining} คน)`,
+        ephemeral: true,
+      };
+    }
 
-      this.missionVotes = new Map();
-      this.selectedTeam = [];
+    let failCount = 0;
+    for (const v of this.missionVotes.values()) {
+      if (v === 'fail') failCount += 1;
+    }
+    const questNo = this.currentQuestIndex + 1;
+    const success = failCount < quest.failsRequired;
+    quest.result = success ? 'success' : 'fail';
 
-      const successCount = this.quests.filter((q) => q.result === 'success').length;
-      const failCountTotal = this.quests.filter((q) => q.result === 'fail').length;
+    this.missionVotes = new Map();
+    this.selectedTeam = [];
 
-      if (successCount >= 3) {
-        const hasAssassin = this.players.some((p) => p.role.key === 'ASSASSIN');
-        if (hasAssassin) {
-          this.phase = 'assassin_guess';
-          broadcast =
-            `**ผลภารกิจที่ ${questNo}**: ${success ? 'สำเร็จ' : 'ล้มเหลว'}\n` +
-            `มีการ์ดล้มเหลว ${failCount} ใบ (ต้องมีอย่างน้อย ${quest.failsRequired} ใบจึงจะล้มเหลว)\n\n` +
-            `ตอนนี้ฝ่ายดีชนะภารกิจครบ 3 ครั้งแล้ว!\n` +
-            'ให้ Assassin ใช้คำสั่ง `/avalon assassin_guess` เพื่อเดาว่าใครคือ Merlin';
-        } else {
-          this.phase = 'ended';
-          this.winner = 'good';
-          broadcast =
-            `**ผลภารกิจที่ ${questNo}**: ${success ? 'สำเร็จ' : 'ล้มเหลว'}\n` +
-            `มีการ์ดล้มเหลว ${failCount} ใบ\n\n` +
-            'ฝ่ายดีชนะภารกิจครบ 3 ครั้ง และไม่มี Assassin เกมจบ ฝ่ายดีชนะ!';
-        }
-      } else if (failCountTotal >= 3) {
-        this.phase = 'ended';
-        this.winner = 'evil';
+    const successTotal = this.quests.filter((q) => q.result === 'success').length;
+    const failTotal = this.quests.filter((q) => q.result === 'fail').length;
+
+    let broadcast;
+
+    const resultLine =
+      `**ผลภารกิจที่ ${questNo}** (ทีม ${quest.teamSize} คน): ${success ? '✅ สำเร็จ' : '❌ ล้มเหลว'}\n` +
+      `มีการ์ดล้มเหลว ${failCount} ใบ (ต้องมีอย่างน้อย ${quest.failsRequired} ใบจึงจะล้มเหลว)\n`;
+
+    const scoreLine = `\n📊 คะแนนรวม: ฝ่ายดีสำเร็จ ${successTotal} | ฝ่ายร้ายล้มเหลว ${failTotal}\n`;
+
+    if (successTotal >= 3) {
+      const hasAssassin = this.players.some((p) => p.role.key === 'ASSASSIN');
+      if (hasAssassin) {
+        this.phase = 'assassin_guess';
         broadcast =
-          `**ผลภารกิจที่ ${questNo}**: ${success ? 'สำเร็จ' : 'ล้มเหลว'}\n` +
-          `มีการ์ดล้มเหลว ${failCount} ใบ\n\n` +
-          'ฝ่ายร้ายทำให้ภารกิจล้มเหลวครบ 3 ครั้ง เกมจบ ฝ่ายร้ายชนะ!';
+          resultLine +
+          scoreLine +
+          '\n🎯 ฝ่ายดีชนะภารกิจครบ 3 ครั้ง! แต่ Assassin ยังมีโอกาสเดาว่าใครคือ Merlin';
       } else {
-        this.phase = 'team_proposal';
-        this.currentQuestIndex += 1;
-        this.leaderIndex = (this.leaderIndex + 1) % this.players.length;
-        const newLeader = this.getLeader();
+        this.phase = 'ended';
+        this.winner = 'good';
         broadcast =
-          `**ผลภารกิจที่ ${questNo}**: ${success ? 'สำเร็จ' : 'ล้มเหลว'}\n` +
-          `มีการ์ดล้มเหลว ${failCount} ใบ\n\n` +
-          `ตอนนี้ผลรวมภารกิจ: ฝ่ายดีสำเร็จ ${successCount} ครั้ง | ฝ่ายร้ายล้มเหลว ${failCountTotal} ครั้ง\n` +
-          `เข้าสู่ภารกิจที่ ${this.currentQuestIndex + 1}\n` +
-          `หัวหน้าทีมคนใหม่คือ <@${newLeader.id}> ใช้คำสั่ง \`/avalon propose_team\` เพื่อเลือกทีม`;
+          resultLine +
+          scoreLine +
+          '\n🏆 ฝ่ายดีชนะภารกิจครบ 3 ครั้ง และไม่มี Assassin — **ฝ่ายดีชนะ!**';
       }
+    } else if (failTotal >= 3) {
+      this.phase = 'ended';
+      this.winner = 'evil';
+      broadcast =
+        resultLine +
+        scoreLine +
+        '\n💀 ฝ่ายร้ายทำให้ภารกิจล้มเหลวครบ 3 ครั้ง — **ฝ่ายร้ายชนะ!**';
+    } else {
+      this.phase = 'team_proposal';
+      this.currentQuestIndex += 1;
+      this.leaderIndex = (this.leaderIndex + 1) % this.players.length;
+      const newLeader = this.getLeader();
+      const nextQuest = this.getCurrentQuest();
+      broadcast =
+        resultLine +
+        scoreLine +
+        `\nเข้าสู่ภารกิจที่ ${this.currentQuestIndex + 1} (ทีม ${nextQuest.teamSize} คน)\n` +
+        `หัวหน้าทีมคนใหม่คือ <@${newLeader.id}>`;
     }
 
     return {
       ok: true,
-      message: `ลงคะแนนภารกิจเรียบร้อยแล้ว${note}${remaining > 0 ? ` (ยังเหลือสมาชิกทีมอีก ${remaining} คนที่ยังไม่ได้โหวต)` : ''}`,
+      allVotesIn: true,
+      message: 'ลงคะแนนภารกิจเรียบร้อยแล้ว',
       broadcast,
       ephemeral: true,
     };
@@ -315,13 +365,19 @@ class AvalonGame {
     this.winner = isMerlin ? 'evil' : 'good';
 
     const resultText = isMerlin
-      ? `Assassin เดาถูกว่า <@${target.id}> คือ Merlin ฝ่ายร้ายชนะ!`
-      : `Assassin เดาผิด <@${target.id}> ไม่ใช่ Merlin ฝ่ายดีชนะ!`;
+      ? `🗡️ Assassin เดาถูกว่า <@${target.id}> คือ **Merlin** — **ฝ่ายร้ายชนะ!**`
+      : `🛡️ Assassin เดาผิด! <@${target.id}> ไม่ใช่ Merlin — **ฝ่ายดีชนะ!**`;
+
+    const roleReveal = this.players
+      .map((p) => `<@${p.id}> — ${p.role.name} (${p.role.side === 'good' ? 'ฝ่ายดี' : 'ฝ่ายร้าย'})`)
+      .join('\n');
 
     return {
       ok: true,
       message: 'คุณได้ทำการเดาเรียบร้อยแล้ว',
-      broadcast: `**ผลการเดาของ Assassin**\n${resultText}`,
+      broadcast:
+        `**ผลการเดาของ Assassin**\n${resultText}\n\n` +
+        `**เฉลยบทบาททุกคน**\n${roleReveal}`,
       ephemeral: true,
     };
   }
@@ -330,12 +386,7 @@ class AvalonGame {
     const questIcons =
       this.quests.length === 0
         ? 'ยังไม่มีภารกิจ (เกมยังไม่เริ่ม)'
-        : this.quests
-            .map((q, i) => {
-              const icon = q.result === 'success' ? '✅' : q.result === 'fail' ? '❌' : '◻️';
-              return `${icon} ภารกิจที่ ${i + 1} (ทีม ${q.teamSize} คน, ล้มเหลวเมื่อการ์ดล้มเหลว ≥ ${q.failsRequired})`;
-            })
-            .join('\n');
+        : this.getQuestTable();
 
     let phaseText = '';
     switch (this.phase) {
@@ -357,21 +408,17 @@ class AvalonGame {
       case 'ended':
         phaseText =
           this.winner === 'good'
-            ? 'เกมจบแล้ว: ฝ่ายดีเป็นผู้ชนะ'
+            ? 'เกมจบแล้ว: ฝ่ายดีเป็นผู้ชนะ 🏆'
             : this.winner === 'evil'
-              ? 'เกมจบแล้ว: ฝ่ายร้ายเป็นผู้ชนะ'
+              ? 'เกมจบแล้ว: ฝ่ายร้ายเป็นผู้ชนะ 💀'
               : 'เกมจบแล้ว';
         break;
       default:
-        phaseText = 'ไม่ทราบสถานะเกม (ผิดปกติ)';
+        phaseText = 'ไม่ทราบสถานะเกม';
     }
 
     const leader = this.getLeader();
-    return {
-      questIcons,
-      phaseText,
-      leaderId: leader ? leader.id : null,
-    };
+    return { questIcons, phaseText, leaderId: leader ? leader.id : null };
   }
 }
 
