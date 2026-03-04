@@ -28,4 +28,7 @@ module.exports = [
     .addSubcommand(sc =>
       sc.setName('help').setDescription('Show how to play and all commands')
     ),
+    .addSubcommand(sc =>
+      sc.setName('test').setDescription('Show how to play and all commands')
+    ),
 ].map(cmd => cmd.toJSON());
