@@ -417,6 +417,7 @@ async function handleInteraction(client, interaction) {
       return true;
     }
     const [u, w] = interaction.values[0].split('-').map(Number);
+    await interaction.deferUpdate();
     await doStartGame(client, interaction, game, { undercoverCount: u, mrWhite: w === 1 });
     return true;
   }
